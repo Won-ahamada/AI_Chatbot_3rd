@@ -1,49 +1,52 @@
-// Simple keyword detector for school queries
-function isSchoolQuery(msg) {
-  const keywords = ["학교", "초등학교", "중학교", "고등학교", "유치원", "교육청"];
-  return keywords.some((kw) => msg.includes(kw));
-}
-
-// 📌 If it's a school query → call /api/school
-if (isSchoolQuery(message)) {
+export default async function handler(req, res) {
   try {
-    // Clean user input (remove filler words like "알려줘", "정보", "검색")
-    const schoolQuery = message
-      .replace(/(알려줘|정보|검색|찾아줘|어디|문의)/g, "")
-      .trim();
+    const {
+      schoolName,
+      educationOfficeCode,
+      schoolCode,
+      schoolType,
+      locationName,
+      foundationType,
+      pageIndex = 1,
+      pageSize = 10,
+      format = "json",
+    } = req.query;
 
-    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
-    const schoolRes = await fetch(
-      `${baseUrl}/api/school?schoolName=${encodeURIComponent(schoolQuery)}`
-    );
+    const API_BASE_URL = "https://open.neis.go.kr/hub/schoolInfo";
+    const API_KEY = process.env.NEIS_API_KEY;
 
-    if (!schoolRes.ok) {
-      throw new Error("School API request failed");
+    if (!API_KEY) {
+      console.error("❌ Missing NEIS_API_KEY");
+      return res.status(500).json({ error: "NEIS API key not configured" });
     }
 
-    const schoolData = await schoolRes.json();
+    const url = new URL(API_BASE_URL);
+    url.searchParams.set("KEY", API_KEY);     // ⚠️ must be uppercase
+    url.searchParams.set("Type", format);
+    url.searchParams.set("pIndex", pageIndex);
+    url.searchParams.set("pSize", pageSize);
 
-    // Format schools list into readable text
-    if (schoolData.schools && schoolData.schools.length > 0) {
-      const formatted = schoolData.schools
-        .map(
-          (s, i) =>
-            `${i + 1}. ${s.name} (${s.type})\n   위치: ${s.location}\n   주소: ${s.address}\n   전화: ${s.phone}\n   홈페이지: ${s.website}`
-        )
-        .join("\n\n");
+    if (educationOfficeCode) url.searchParams.set("ATPT_OFCDC_SC_CODE", educationOfficeCode);
+    if (schoolCode) url.searchParams.set("SD_SCHUL_CODE", schoolCode);
+    if (schoolName) url.searchParams.set("SCHUL_NM", schoolName);
+    if (schoolType) url.searchParams.set("SCHUL_KND_SC_NM", schoolType);
+    if (locationName) url.searchParams.set("LCTN_SC_NM", locationName);
+    if (foundationType) url.searchParams.set("FOND_SC_NM", foundationType);
 
-      return res.status(200).json({
-        response: `🔎 학교 검색 결과:\n\n${formatted}`,
-        timestamp: new Date().toISOString(),
-      });
-    } else {
-      return res.status(200).json({
-        response: "해당 조건에 맞는 학교 정보를 찾을 수 없습니다.",
-        timestamp: new Date().toISOString(),
-      });
+    console.log("📡 NEIS API request:", url.toString());  // 👈 debug log
+
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("❌ NEIS error response:", errText);
+      return res.status(response.status).json({ error: "NEIS API request failed", details: errText });
     }
+
+    const data = await response.json();
+    return res.status(200).json(data);
+
   } catch (err) {
-    console.error("School API error:", err);
-    return res.status(500).json({ error: "학교 정보 검색 실패" });
+    console.error("❌ School API Fatal Error:", err);
+    return res.status(500).json({ error: "Internal server error", details: err.message });
   }
 }
