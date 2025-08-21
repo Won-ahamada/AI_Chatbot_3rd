@@ -1,71 +1,49 @@
-export default async function handler(req, res) {
-  // Enable CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+// Simple keyword detector for school queries
+function isSchoolQuery(msg) {
+  const keywords = ["학교", "초등학교", "중학교", "고등학교", "유치원", "교육청"];
+  return keywords.some((kw) => msg.includes(kw));
+}
 
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
+// 📌 If it's a school query → call /api/school
+if (isSchoolQuery(message)) {
   try {
-    const {
-      schoolName,
-      educationOfficeCode,
-      schoolCode,
-      schoolType,
-      locationName,
-      foundationType,
-      pageIndex = 1,
-      pageSize = 10,
-      format = "json",
-    } = req.query;
+    // Clean user input (remove filler words like "알려줘", "정보", "검색")
+    const schoolQuery = message
+      .replace(/(알려줘|정보|검색|찾아줘|어디|문의)/g, "")
+      .trim();
 
-    const API_BASE_URL = "https://open.neis.go.kr/hub/schoolInfo";
-    const API_KEY = process.env.NEIS_API_KEY; // ⚠️ add your key to .env
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const schoolRes = await fetch(
+      `${baseUrl}/api/school?schoolName=${encodeURIComponent(schoolQuery)}`
+    );
 
-    const url = new URL(API_BASE_URL);
-    url.searchParams.set("KEY", API_KEY);
-    url.searchParams.set("Type", format);
-    url.searchParams.set("pIndex", pageIndex);
-    url.searchParams.set("pSize", pageSize);
-
-    if (educationOfficeCode) url.searchParams.set("ATPT_OFCDC_SC_CODE", educationOfficeCode);
-    if (schoolCode) url.searchParams.set("SD_SCHUL_CODE", schoolCode);
-    if (schoolName) url.searchParams.set("SCHUL_NM", schoolName);
-    if (schoolType) url.searchParams.set("SCHUL_KND_SC_NM", schoolType);
-    if (locationName) url.searchParams.set("LCTN_SC_NM", locationName);
-    if (foundationType) url.searchParams.set("FOND_SC_NM", foundationType);
-
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      return res.status(response.status).json({ error: "NEIS API request failed" });
+    if (!schoolRes.ok) {
+      throw new Error("School API request failed");
     }
 
-    const data = await response.json();
+    const schoolData = await schoolRes.json();
 
-    // Format response for chatbot readability
-    if (data?.schoolInfo?.[1]?.row) {
-      const schools = data.schoolInfo[1].row.map((s) => ({
-        name: s.SCHUL_NM,
-        type: s.SCHUL_KND_SC_NM,
-        code: s.SD_SCHUL_CODE,
-        location: s.LCTN_SC_NM,
-        address: s.ORG_RDNMA || "N/A",
-        phone: s.ORG_TELNO || "N/A",
-        website: s.HMPG_ADRES || "N/A",
-        founded: s.FOND_YMD || "N/A",
-      }));
-      return res.status(200).json({ schools });
+    // Format schools list into readable text
+    if (schoolData.schools && schoolData.schools.length > 0) {
+      const formatted = schoolData.schools
+        .map(
+          (s, i) =>
+            `${i + 1}. ${s.name} (${s.type})\n   위치: ${s.location}\n   주소: ${s.address}\n   전화: ${s.phone}\n   홈페이지: ${s.website}`
+        )
+        .join("\n\n");
+
+      return res.status(200).json({
+        response: `🔎 학교 검색 결과:\n\n${formatted}`,
+        timestamp: new Date().toISOString(),
+      });
     } else {
-      return res.status(404).json({ message: "No schools found" });
+      return res.status(200).json({
+        response: "해당 조건에 맞는 학교 정보를 찾을 수 없습니다.",
+        timestamp: new Date().toISOString(),
+      });
     }
-  } catch (error) {
-    console.error("School API error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+  } catch (err) {
+    console.error("School API error:", err);
+    return res.status(500).json({ error: "학교 정보 검색 실패" });
   }
 }
